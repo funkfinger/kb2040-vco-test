@@ -202,6 +202,8 @@ const static float voctpow[1230] = {
 };
 float freq_table[2048];
 
+void setup1() {}
+
 void setup() {
   pinMode(0, INPUT_PULLUP);  // oct select
   pinMode(1, INPUT_PULLUP);  // oct select
@@ -247,108 +249,175 @@ void on_pwm_wrap() {
 
 void loop() {
   old_push_sw = push_sw;
-  oct_sw = 1;
-  mode = 1;
+
+  //-------------------octave select-------------------------------
+  if (digitalRead(0) == 1 && digitalRead(1) == 1) {
+    oct_sw = 1;
+  } else if (digitalRead(0) == 0 && digitalRead(1) == 1) {
+    oct_sw = 3;
+  } else if (digitalRead(0) == 1 && digitalRead(1) == 0) {
+    oct_sw = 0;
+  }
+
+  //  -------------------mode select-------------------------------
+  if (digitalRead(4) == 1 && digitalRead(3) == 1) {
+    mode = 1;  // fm
+  } else if (digitalRead(4) == 0 && digitalRead(3) == 1) {
+    mode = 0;  // AM
+  } else if (digitalRead(4) == 1 && digitalRead(3) == 0) {
+    mode = 2;  // wavefolder
+  }
 
   //  -------------------frequeny calculation-------------------------------
-  adc = 3000 * calb;              // Correct resistance errors
+  adc = analogRead(26) * calb;    // Correct resistance errors
   adc = constrain(adc, 0, 1225);  // Covers 6(=1220) octaves. If it is 1230 or
                                   // more, the operation becomes unstable.
-  freq_pot = map(3000, 0, 1023, 0, 127);
+  freq_pot = map(analogRead(27), 0, 1023, 0, 127);
   osc_freq = freq_table[adc + freq_pot];  // V/oct apply
   osc_freq = 256 * osc_freq / 122070 * (1 + oct_sw);
-  mod = 1023 - constrain(3000 + 3000, 0, 1023);
 
-  waveform = 7;
-  if (mode == 0 || mode == 2) {
-    table_set();
+  //  -------------------mod parameter set-------------------------------
+  if (mode == 0) {  // fold
+    mod = constrain(analogRead(29) + analogRead(28), 0, 1023) * 0.0036 +
+          0.90;            // 28 is CV , 29 is pot
+  } else if (mode == 1) {  // FM
+    mod = constrain(analogRead(29) + analogRead(28), 0, 1023) / 8;
+  } else if (mode == 2) {  // AM
+    mod = 1023 - constrain(analogRead(29) + analogRead(28), 0, 1023);
+  }
+
+  //  -------------------push sw-------------------------------
+  push_sw = digitalRead(6);
+  if (push_sw == 0 && old_push_sw == 1) {  // when push sw ON
+    waveform++;                            // change waveform
+    if (waveform > 7) {
+      waveform = 0;
+    }
+    if (mode == 0 || mode == 2) {
+      table_set();
+    }
   }
   //}
 
-  switch (waveform) {
-    case 0:
-      for (int i = 0; i < 256; i++) {  // FM1
-        mod2_wavetable[i] = (sin(2 * M_PI * i / 256 +
-                                 mod / 128 * sin(2 * M_PI * 3 * i / 256))) *
-                            511;
+  // void loop1() {//modulation
+  if (mode == 0) {  // wavefold
+    for (int i = 0; i < 256; i++) {
+      mod_wavetable[i] = wavetable[i] * mod;
+    }
+    for (int i = 0; i < 256; i++) {  // fold
+      if (mod_wavetable[i] > 511 && mod_wavetable[i] < 1023 + 512) {
+        mod2_wavetable[i] = 1024 - mod_wavetable[i];
+      } else if (mod_wavetable[i] < -512 && mod_wavetable[i] > -1024 - 512) {
+        mod2_wavetable[i] = -1023 - mod_wavetable[i];
+      } else if (mod_wavetable[i] < -1024 - 511) {
+        mod2_wavetable[i] = 2048 + mod_wavetable[i];
+      } else if (mod_wavetable[i] > 1023 + 511) {
+        mod2_wavetable[i] = -2047 + mod_wavetable[i];
+      } else {
+        mod2_wavetable[i] = mod_wavetable[i];
       }
-      break;
+    }
+  } else if (mode == 1) {  // FM
+    switch (waveform) {
+      case 0:
+        for (int i = 0; i < 256; i++) {  // FM1
+          mod2_wavetable[i] = (sin(2 * M_PI * i / 256 +
+                                   mod / 128 * sin(2 * M_PI * 3 * i / 256))) *
+                              511;
+        }
+        break;
 
-    case 1:
-      for (int i = 0; i < 256; i++) {  // FM2
-        mod2_wavetable[i] =
-            (sin(2 * M_PI * i / 256 +
-                 mod / 128 *
-                     sin(2 * M_PI * 3 * i / 256 +
-                         mod / 128 * sin(2 * M_PI * 3 * i / 256)))) *
-            511;
-      }
-      break;
+      case 1:
+        for (int i = 0; i < 256; i++) {  // FM2
+          mod2_wavetable[i] =
+              (sin(2 * M_PI * i / 256 +
+                   mod / 128 *
+                       sin(2 * M_PI * 3 * i / 256 +
+                           mod / 128 * sin(2 * M_PI * 3 * i / 256)))) *
+              511;
+        }
+        break;
 
-    case 2:
-      for (int i = 0; i < 256; i++) {  // FM3
-        mod2_wavetable[i] =
-            (sin(2 * M_PI * i / 256 +
-                 mod / 128 *
-                     sin(2 * M_PI * 5 * i / 256 +
-                         mod / 128 * sin(2 * M_PI * 7 * i / 256)))) *
-            511;
-      }
-      break;
+      case 2:
+        for (int i = 0; i < 256; i++) {  // FM3
+          mod2_wavetable[i] =
+              (sin(2 * M_PI * i / 256 +
+                   mod / 128 *
+                       sin(2 * M_PI * 5 * i / 256 +
+                           mod / 128 * sin(2 * M_PI * 7 * i / 256)))) *
+              511;
+        }
+        break;
 
-    case 3:
-      for (int i = 0; i < 256; i++) {  // FM4
-        mod2_wavetable[i] =
-            (sin(2 * M_PI * i / 256 +
-                 mod / 128 *
-                     sin(2 * M_PI * 9 * i / 256 +
-                         mod / 128 * sin(2 * M_PI * 5 * i / 256)))) *
-            511;
-      }
-      break;
+      case 3:
+        for (int i = 0; i < 256; i++) {  // FM4
+          mod2_wavetable[i] =
+              (sin(2 * M_PI * i / 256 +
+                   mod / 128 *
+                       sin(2 * M_PI * 9 * i / 256 +
+                           mod / 128 * sin(2 * M_PI * 5 * i / 256)))) *
+              511;
+        }
+        break;
 
-    case 4:
-      for (int i = 0; i < 256; i++) {  // FM5
-        mod2_wavetable[i] = ((sin(2 * M_PI * i / 256 +
-                                  mod / 128 * sin(2 * M_PI * 19 * i / 256))) +
-                             (sin(2 * M_PI * 3 * i / 256 +
-                                  mod / 128 * sin(2 * M_PI * 7 * i / 256)))) /
-                            2 * 511;
-      }
-      break;
+      case 4:
+        for (int i = 0; i < 256; i++) {  // FM5
+          mod2_wavetable[i] = ((sin(2 * M_PI * i / 256 +
+                                    mod / 128 * sin(2 * M_PI * 19 * i / 256))) +
+                               (sin(2 * M_PI * 3 * i / 256 +
+                                    mod / 128 * sin(2 * M_PI * 7 * i / 256)))) /
+                              2 * 511;
+        }
+        break;
 
-    case 5:
-      for (int i = 0; i < 256; i++) {  // FM6
-        mod2_wavetable[i] = ((sin(2 * M_PI * i / 256 +
-                                  mod / 128 * sin(2 * M_PI * 7 * i / 124))) +
-                             (sin(2 * M_PI * 9 * i / 368 +
-                                  mod / 128 * sin(2 * M_PI * 11 * i / 256)))) *
-                            511;
-      }
-      break;
+      case 5:
+        for (int i = 0; i < 256; i++) {  // FM6
+          mod2_wavetable[i] =
+              ((sin(2 * M_PI * i / 256 +
+                    mod / 128 * sin(2 * M_PI * 7 * i / 124))) +
+               (sin(2 * M_PI * 9 * i / 368 +
+                    mod / 128 * sin(2 * M_PI * 11 * i / 256)))) *
+              511;
+        }
+        break;
 
-    case 6:
-      for (int i = 0; i < 256; i++) {  // FM7
-        mod2_wavetable[i] = ((sin(2 * M_PI * i / 256 +
-                                  mod / 128 * sin(2 * M_PI * 13 * i / 256))) +
-                             (sin(2 * M_PI * 17 * i / 111 +
-                                  mod / 128 * sin(2 * M_PI * 19 * i / 89)))) *
-                            511;
-      }
-      break;
+      case 6:
+        for (int i = 0; i < 256; i++) {  // FM7
+          mod2_wavetable[i] = ((sin(2 * M_PI * i / 256 +
+                                    mod / 128 * sin(2 * M_PI * 13 * i / 256))) +
+                               (sin(2 * M_PI * 17 * i / 111 +
+                                    mod / 128 * sin(2 * M_PI * 19 * i / 89)))) *
+                              511;
+        }
+        break;
 
-    case 7:
-      for (int i = 0; i < 256; i++) {  // FM8
-        mod2_wavetable[i] =
-            (sin(2 * M_PI * i / 256 +
-                 mod / 128 *
-                     sin(2 * M_PI * 11 * i / 124 +
-                         mod / 128 *
-                             sin(2 * M_PI * 7 * i / 333 +
-                                 mod / 128 * sin(2 * M_PI * 9 * i / 56))))) *
-            511;
+      case 7:
+        for (int i = 0; i < 256; i++) {  // FM8
+          mod2_wavetable[i] =
+              (sin(2 * M_PI * i / 256 +
+                   mod / 128 *
+                       sin(2 * M_PI * 11 * i / 124 +
+                           mod / 128 *
+                               sin(2 * M_PI * 7 * i / 333 +
+                                   mod / 128 * sin(2 * M_PI * 9 * i / 56))))) *
+              511;
+        }
+        break;
+    }
+  }
+
+  else if (mode == 2) {  // AM
+    if (timer + mod <= micros()) {
+      k++;
+      if (k > 63) {
+        k = 0;
       }
-      break;
+      AM_mod = sin(2 * M_PI * k / 63);  // make modulation sine wave
+      for (int i = 0; i < 255; i++) {
+        mod2_wavetable[i] = wavetable[i] * AM_mod;  // multiply AM sine wave
+      }
+      timer = micros();
+    }
   }
 }
 
